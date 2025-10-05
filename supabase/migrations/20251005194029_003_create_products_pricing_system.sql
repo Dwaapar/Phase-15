@@ -1,50 +1,80 @@
 /*
-  # Enterprise Products and Pricing System
+  # Products and Pricing System
 
   ## Overview
-  Creates comprehensive product catalog supporting workflows, agents, assets, automation services, and tools
-  with unified pricing structure and subscription management.
+  Comprehensive e-commerce system supporting multiple product types (workflows, agents, assets,
+  services, tools) with flexible pricing models and subscription management.
 
-  ## 1. Product Categories and Taxonomy
-    - `product_categories` - Hierarchical category structure with parent/child relationships
-    - Supports nested categories for organization (e.g., Marketing > Email > Lead Nurture)
+  ## 1. Product Catalog
 
-  ## 2. Core Products Table
-    - `products` - Universal table for all product types (workflows, agents, assets, services, tools)
-    - Fields: name, description, type, category, pricing_model, base_price, tier_restrictions
-    - Supports multiple pricing models: free, one-time, subscription, usage-based, custom
-    - Tier-gated access control (free, starter, professional, enterprise)
+  ### `product_categories`
+  Hierarchical category structure with parent/child relationships
+  - Supports nested categories (e.g., Marketing → Email → Lead Nurture)
+  - Fields: name, slug, description, parent_id, icon, display_order, is_active
 
-  ## 3. Pricing Tiers and Subscriptions
-    - `pricing_tiers` - Platform subscription plans with feature limits and pricing
-    - `subscriptions` - User subscription tracking with billing cycles and status
-    - `subscription_features` - Feature flags and limits per tier
-    - Tiers: Free, Starter ($19/mo), Professional ($49/mo), Enterprise (custom)
+  ### `products`
+  Universal product table supporting all marketplace offerings
+  - Product types: workflow, agent, asset, service, tool
+  - Pricing models: free, one_time, subscription, usage_based, custom
+  - Tier restrictions: free, starter, professional, enterprise
+  - Fields: name, slug, description, type, category_id, pricing_model, base_price, 
+    minimum_tier, features, specifications, media, deployment_model, integrations, tags,
+    difficulty_level, setup_time_minutes, is_featured, install_count, ratings
 
-  ## 4. Orders and Purchases
-    - `orders` - One-time product purchases with payment tracking
-    - `order_items` - Individual line items per order
-    - `user_products` - Junction table tracking deployed/activated products
-    - Supports license management and usage limits
+  ## 2. Subscription Management
 
-  ## 5. Product Bundles
-    - `product_bundles` - Packaged offerings with discount pricing
-    - `bundle_items` - Products included in each bundle
+  ### `pricing_tiers`
+  Platform subscription tiers (Free, Starter, Professional, Enterprise)
+  - Fields: name, slug, price_monthly, price_annual, features (jsonb), limits (jsonb),
+    display_order, is_active, is_custom
 
-  ## 6. Security
-    - RLS enabled on all tables
-    - Users can view public products and their own purchases
-    - Admins have full access for management
-    - Secure payment and subscription data access
+  ### `subscriptions`
+  User subscription tracking with billing cycles
+  - Fields: user_id, tier_id, status (active/trialing/past_due/canceled/paused),
+    billing_cycle (monthly/annual), current_period_start, current_period_end,
+    cancel_at_period_end, stripe_subscription_id, stripe_customer_id, trial_ends_at
 
-  ## Important Notes
-    - All prices in cents (USD) for precision
-    - Supports multiple pricing models for flexibility
-    - Usage tracking enforces tier limits
-    - Automatic renewal handling for subscriptions
+  ### `subscription_features`
+  Feature flags and limits per tier
+  - Fields: tier_id, feature_key, feature_name, feature_value (jsonb), description
+
+  ## 3. Orders and Purchases
+
+  ### `orders`
+  One-time product purchases with payment tracking
+  - Fields: user_id, order_number, status (pending/processing/completed/failed/refunded),
+    subtotal, tax, discount, total, currency, payment_method, stripe_payment_intent_id,
+    invoice_url, receipt_url, billing_details, paid_at, refunded_at
+
+  ### `order_items`
+  Individual line items per order
+  - Fields: order_id, product_id, quantity, unit_price, total_price, license_key,
+    download_url, download_expires_at
+
+  ### `user_products`
+  Junction table tracking deployed/activated products
+  - Fields: user_id, product_id, order_id, subscription_id, status (active/inactive/suspended/expired),
+    deployment_config, usage_stats, activated_at, expires_at, last_used_at
+
+  ## 4. Product Bundles
+
+  ### `product_bundles`
+  Packaged offerings with discount pricing
+  - Fields: name, slug, description, price, discount_percentage, minimum_tier,
+    is_active, valid_from, valid_until, media
+
+  ### `bundle_items`
+  Products included in each bundle
+  - Fields: bundle_id, product_id, display_order
+
+  ## 5. Security
+  - RLS enabled on all tables
+  - Public read access for products, categories, and pricing tiers
+  - Users can view their own subscriptions, orders, and products
+  - Admin full access for product management
 */
 
--- Product Categories with hierarchical structure
+-- Product Categories table
 CREATE TABLE IF NOT EXISTS product_categories (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name text NOT NULL,
@@ -58,7 +88,7 @@ CREATE TABLE IF NOT EXISTS product_categories (
   updated_at timestamptz DEFAULT now()
 );
 
--- Core Products table supporting all product types
+-- Products table
 CREATE TABLE IF NOT EXISTS products (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name text NOT NULL,
@@ -83,14 +113,14 @@ CREATE TABLE IF NOT EXISTS products (
   is_active boolean DEFAULT true,
   install_count int DEFAULT 0,
   view_count int DEFAULT 0,
-  average_rating decimal(3,2) DEFAULT 0,
+  average_rating decimal(3,2) DEFAULT 0 CHECK (average_rating >= 0 AND average_rating <= 5),
   review_count int DEFAULT 0,
   created_by uuid REFERENCES auth.users(id) ON DELETE SET NULL,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
 );
 
--- Pricing Tiers (Platform Subscriptions)
+-- Pricing Tiers table
 CREATE TABLE IF NOT EXISTS pricing_tiers (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name text NOT NULL UNIQUE,
@@ -107,7 +137,7 @@ CREATE TABLE IF NOT EXISTS pricing_tiers (
   updated_at timestamptz DEFAULT now()
 );
 
--- User Subscriptions
+-- Subscriptions table
 CREATE TABLE IF NOT EXISTS subscriptions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -127,7 +157,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   UNIQUE(user_id, tier_id, status)
 );
 
--- Subscription Features and Limits
+-- Subscription Features table
 CREATE TABLE IF NOT EXISTS subscription_features (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tier_id uuid NOT NULL REFERENCES pricing_tiers(id) ON DELETE CASCADE,
@@ -139,7 +169,7 @@ CREATE TABLE IF NOT EXISTS subscription_features (
   UNIQUE(tier_id, feature_key)
 );
 
--- Orders for one-time purchases
+-- Orders table
 CREATE TABLE IF NOT EXISTS orders (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -163,12 +193,12 @@ CREATE TABLE IF NOT EXISTS orders (
   updated_at timestamptz DEFAULT now()
 );
 
--- Order Items
+-- Order Items table
 CREATE TABLE IF NOT EXISTS order_items (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   order_id uuid NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
   product_id uuid NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
-  quantity int NOT NULL DEFAULT 1,
+  quantity int NOT NULL DEFAULT 1 CHECK (quantity > 0),
   unit_price int NOT NULL,
   total_price int NOT NULL,
   license_key text,
@@ -178,7 +208,7 @@ CREATE TABLE IF NOT EXISTS order_items (
   created_at timestamptz DEFAULT now()
 );
 
--- User Products (Deployed/Activated Products)
+-- User Products table
 CREATE TABLE IF NOT EXISTS user_products (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -196,7 +226,7 @@ CREATE TABLE IF NOT EXISTS user_products (
   UNIQUE(user_id, product_id)
 );
 
--- Product Bundles
+-- Product Bundles table
 CREATE TABLE IF NOT EXISTS product_bundles (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name text NOT NULL,
@@ -204,7 +234,7 @@ CREATE TABLE IF NOT EXISTS product_bundles (
   description text,
   price int NOT NULL,
   currency text DEFAULT 'USD',
-  discount_percentage int DEFAULT 0,
+  discount_percentage int DEFAULT 0 CHECK (discount_percentage >= 0 AND discount_percentage <= 100),
   minimum_tier text DEFAULT 'free' CHECK (minimum_tier IN ('free', 'starter', 'professional', 'enterprise')),
   is_active boolean DEFAULT true,
   valid_from timestamptz,
@@ -214,7 +244,7 @@ CREATE TABLE IF NOT EXISTS product_bundles (
   updated_at timestamptz DEFAULT now()
 );
 
--- Bundle Items
+-- Bundle Items table
 CREATE TABLE IF NOT EXISTS bundle_items (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   bundle_id uuid NOT NULL REFERENCES product_bundles(id) ON DELETE CASCADE,
@@ -224,21 +254,26 @@ CREATE TABLE IF NOT EXISTS bundle_items (
   UNIQUE(bundle_id, product_id)
 );
 
--- Indexes for performance
+-- Create indexes
 CREATE INDEX IF NOT EXISTS idx_products_type ON products(product_type);
 CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_id);
 CREATE INDEX IF NOT EXISTS idx_products_tier ON products(minimum_tier);
 CREATE INDEX IF NOT EXISTS idx_products_active ON products(is_active) WHERE is_active = true;
 CREATE INDEX IF NOT EXISTS idx_products_featured ON products(is_featured) WHERE is_featured = true;
+CREATE INDEX IF NOT EXISTS idx_products_slug ON products(slug);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status);
 CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id);
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+CREATE INDEX IF NOT EXISTS idx_orders_number ON orders(order_number);
 CREATE INDEX IF NOT EXISTS idx_user_products_user ON user_products(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_products_product ON user_products(product_id);
 CREATE INDEX IF NOT EXISTS idx_user_products_status ON user_products(status);
+CREATE INDEX IF NOT EXISTS idx_categories_parent ON product_categories(parent_id);
+CREATE INDEX IF NOT EXISTS idx_categories_slug ON product_categories(slug);
+CREATE INDEX IF NOT EXISTS idx_bundles_slug ON product_bundles(slug);
 
--- Enable Row Level Security
+-- Enable RLS
 ALTER TABLE product_categories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pricing_tiers ENABLE ROW LEVEL SECURITY;
@@ -250,231 +285,119 @@ ALTER TABLE user_products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE product_bundles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE bundle_items ENABLE ROW LEVEL SECURITY;
 
--- RLS Policies: Product Categories (public read)
+-- RLS Policies for product_categories (public read)
 CREATE POLICY "Anyone can view active categories"
-  ON product_categories FOR SELECT
-  TO public
-  USING (is_active = true);
+  ON product_categories FOR SELECT TO public USING (is_active = true);
 
 CREATE POLICY "Admins can manage categories"
-  ON product_categories FOR ALL
-  TO authenticated
-  USING (EXISTS (
-    SELECT 1 FROM profiles
-    WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
-  ))
-  WITH CHECK (EXISTS (
-    SELECT 1 FROM profiles
-    WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
-  ));
+  ON product_categories FOR ALL TO authenticated
+  USING (EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'));
 
--- RLS Policies: Products (public read for active)
+-- RLS Policies for products (public read for active)
 CREATE POLICY "Anyone can view active products"
-  ON products FOR SELECT
-  TO public
-  USING (is_active = true);
+  ON products FOR SELECT TO public USING (is_active = true);
 
 CREATE POLICY "Admins can manage products"
-  ON products FOR ALL
-  TO authenticated
-  USING (EXISTS (
-    SELECT 1 FROM profiles
-    WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
-  ))
-  WITH CHECK (EXISTS (
-    SELECT 1 FROM profiles
-    WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
-  ));
+  ON products FOR ALL TO authenticated
+  USING (EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'));
 
--- RLS Policies: Pricing Tiers (public read)
+-- RLS Policies for pricing_tiers (public read)
 CREATE POLICY "Anyone can view active tiers"
-  ON pricing_tiers FOR SELECT
-  TO public
-  USING (is_active = true);
+  ON pricing_tiers FOR SELECT TO public USING (is_active = true);
 
 CREATE POLICY "Admins can manage tiers"
-  ON pricing_tiers FOR ALL
-  TO authenticated
-  USING (EXISTS (
-    SELECT 1 FROM profiles
-    WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
-  ))
-  WITH CHECK (EXISTS (
-    SELECT 1 FROM profiles
-    WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
-  ));
+  ON pricing_tiers FOR ALL TO authenticated
+  USING (EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'));
 
--- RLS Policies: Subscriptions (users see own)
+-- RLS Policies for subscriptions (users see own)
 CREATE POLICY "Users can view own subscriptions"
-  ON subscriptions FOR SELECT
-  TO authenticated
-  USING (auth.uid() = user_id);
+  ON subscriptions FOR SELECT TO authenticated USING (auth.uid() = user_id);
 
 CREATE POLICY "Users can create own subscriptions"
-  ON subscriptions FOR INSERT
-  TO authenticated
-  WITH CHECK (auth.uid() = user_id);
+  ON subscriptions FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
 
 CREATE POLICY "Users can update own subscriptions"
-  ON subscriptions FOR UPDATE
-  TO authenticated
+  ON subscriptions FOR UPDATE TO authenticated
   USING (auth.uid() = user_id)
   WITH CHECK (auth.uid() = user_id);
 
 CREATE POLICY "Admins can manage all subscriptions"
-  ON subscriptions FOR ALL
-  TO authenticated
-  USING (EXISTS (
-    SELECT 1 FROM profiles
-    WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
-  ))
-  WITH CHECK (EXISTS (
-    SELECT 1 FROM profiles
-    WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
-  ));
+  ON subscriptions FOR ALL TO authenticated
+  USING (EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'));
 
--- RLS Policies: Subscription Features (public read)
+-- RLS Policies for subscription_features (public read)
 CREATE POLICY "Anyone can view subscription features"
-  ON subscription_features FOR SELECT
-  TO public
-  USING (true);
+  ON subscription_features FOR SELECT TO public USING (true);
 
 CREATE POLICY "Admins can manage subscription features"
-  ON subscription_features FOR ALL
-  TO authenticated
-  USING (EXISTS (
-    SELECT 1 FROM profiles
-    WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
-  ))
-  WITH CHECK (EXISTS (
-    SELECT 1 FROM profiles
-    WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
-  ));
+  ON subscription_features FOR ALL TO authenticated
+  USING (EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'));
 
--- RLS Policies: Orders (users see own)
+-- RLS Policies for orders (users see own)
 CREATE POLICY "Users can view own orders"
-  ON orders FOR SELECT
-  TO authenticated
-  USING (auth.uid() = user_id);
+  ON orders FOR SELECT TO authenticated USING (auth.uid() = user_id);
 
 CREATE POLICY "Users can create own orders"
-  ON orders FOR INSERT
-  TO authenticated
-  WITH CHECK (auth.uid() = user_id);
+  ON orders FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
 
 CREATE POLICY "Admins can manage all orders"
-  ON orders FOR ALL
-  TO authenticated
-  USING (EXISTS (
-    SELECT 1 FROM profiles
-    WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
-  ))
-  WITH CHECK (EXISTS (
-    SELECT 1 FROM profiles
-    WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
-  ));
+  ON orders FOR ALL TO authenticated
+  USING (EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'));
 
--- RLS Policies: Order Items (through order relationship)
+-- RLS Policies for order_items (through order relationship)
 CREATE POLICY "Users can view own order items"
-  ON order_items FOR SELECT
-  TO authenticated
-  USING (EXISTS (
-    SELECT 1 FROM orders
-    WHERE orders.id = order_items.order_id AND orders.user_id = auth.uid()
-  ));
+  ON order_items FOR SELECT TO authenticated
+  USING (EXISTS (SELECT 1 FROM orders WHERE orders.id = order_items.order_id AND orders.user_id = auth.uid()));
 
 CREATE POLICY "Users can create order items for own orders"
-  ON order_items FOR INSERT
-  TO authenticated
-  WITH CHECK (EXISTS (
-    SELECT 1 FROM orders
-    WHERE orders.id = order_items.order_id AND orders.user_id = auth.uid()
-  ));
+  ON order_items FOR INSERT TO authenticated
+  WITH CHECK (EXISTS (SELECT 1 FROM orders WHERE orders.id = order_items.order_id AND orders.user_id = auth.uid()));
 
 CREATE POLICY "Admins can manage all order items"
-  ON order_items FOR ALL
-  TO authenticated
-  USING (EXISTS (
-    SELECT 1 FROM profiles
-    WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
-  ))
-  WITH CHECK (EXISTS (
-    SELECT 1 FROM profiles
-    WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
-  ));
+  ON order_items FOR ALL TO authenticated
+  USING (EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'));
 
--- RLS Policies: User Products (users see own)
+-- RLS Policies for user_products (users see own)
 CREATE POLICY "Users can view own products"
-  ON user_products FOR SELECT
-  TO authenticated
-  USING (auth.uid() = user_id);
+  ON user_products FOR SELECT TO authenticated USING (auth.uid() = user_id);
 
 CREATE POLICY "Users can manage own products"
-  ON user_products FOR ALL
-  TO authenticated
+  ON user_products FOR ALL TO authenticated
   USING (auth.uid() = user_id)
   WITH CHECK (auth.uid() = user_id);
 
 CREATE POLICY "Admins can manage all user products"
-  ON user_products FOR ALL
-  TO authenticated
-  USING (EXISTS (
-    SELECT 1 FROM profiles
-    WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
-  ))
-  WITH CHECK (EXISTS (
-    SELECT 1 FROM profiles
-    WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
-  ));
+  ON user_products FOR ALL TO authenticated
+  USING (EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'));
 
--- RLS Policies: Product Bundles (public read)
+-- RLS Policies for product_bundles (public read)
 CREATE POLICY "Anyone can view active bundles"
-  ON product_bundles FOR SELECT
-  TO public
-  USING (is_active = true);
+  ON product_bundles FOR SELECT TO public USING (is_active = true);
 
 CREATE POLICY "Admins can manage bundles"
-  ON product_bundles FOR ALL
-  TO authenticated
-  USING (EXISTS (
-    SELECT 1 FROM profiles
-    WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
-  ))
-  WITH CHECK (EXISTS (
-    SELECT 1 FROM profiles
-    WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
-  ));
+  ON product_bundles FOR ALL TO authenticated
+  USING (EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'));
 
--- RLS Policies: Bundle Items (public read through bundle)
+-- RLS Policies for bundle_items (public read through bundle)
 CREATE POLICY "Anyone can view bundle items"
-  ON bundle_items FOR SELECT
-  TO public
-  USING (EXISTS (
-    SELECT 1 FROM product_bundles
-    WHERE product_bundles.id = bundle_items.bundle_id AND product_bundles.is_active = true
-  ));
+  ON bundle_items FOR SELECT TO public
+  USING (EXISTS (SELECT 1 FROM product_bundles WHERE product_bundles.id = bundle_items.bundle_id AND product_bundles.is_active = true));
 
 CREATE POLICY "Admins can manage bundle items"
-  ON bundle_items FOR ALL
-  TO authenticated
-  USING (EXISTS (
-    SELECT 1 FROM profiles
-    WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
-  ))
-  WITH CHECK (EXISTS (
-    SELECT 1 FROM profiles
-    WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
-  ));
+  ON bundle_items FOR ALL TO authenticated
+  USING (EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'))
+  WITH CHECK (EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'));
 
--- Trigger to update updated_at timestamp
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-  NEW.updated_at = now();
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
+-- Add updated_at triggers
 CREATE TRIGGER update_product_categories_updated_at BEFORE UPDATE ON product_categories
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
